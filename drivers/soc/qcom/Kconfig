@@ -1024,4 +1024,13 @@ config MFSE_QMI
 	help
 	 This option enables the QMI client driver for MFSE service.
 
+config MSM_BAM_DMUX
+	bool "BAM Data Mux Driver"
+	depends on SPS
+	help
+	  Support Muxed Data Channels over BAM interface.
+	  BAM has a limited number of pipes.  This driver
+	  provides a means to support more logical channels
+	  via muxing than BAM could without muxing.
+
 source "drivers/soc/qcom/memshare/Kconfig"
