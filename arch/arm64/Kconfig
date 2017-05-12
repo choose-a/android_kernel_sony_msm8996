@@ -771,11 +771,12 @@ config ARCH_NR_GPIO
         default 256
         help
           Maximum number of GPIOs in the system.
-
           If unsure, leave the default value.
 
 
 source kernel/Kconfig.preempt
+
+source kernel/Kconfig.hz
 
 config HZ
 	int
