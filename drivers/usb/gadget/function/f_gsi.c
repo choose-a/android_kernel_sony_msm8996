@@ -2622,13 +2622,13 @@ static int gsi_bind(struct usb_configuration *c, struct usb_function *f)
 					DEFAULT_PKT_ALIGNMENT_FACTOR);
 		rndis_set_pkt_alignment_factor(gsi->params,
 					DEFAULT_PKT_ALIGNMENT_FACTOR);
-		if (gsi->rndis_use_wceis) {
+		if(gsi->rndis_use_wceis) {
 			info.iad_desc->bFunctionClass =
-				USB_CLASS_WIRELESS_CONTROLLER;
+					USB_CLASS_WIRELESS_CONTROLLER;
 			info.iad_desc->bFunctionSubClass = 0x01;
 			info.iad_desc->bFunctionProtocol = 0x03;
 			info.ctrl_desc->bInterfaceClass =
-				USB_CLASS_WIRELESS_CONTROLLER;
+					USB_CLASS_WIRELESS_CONTROLLER;
 			info.ctrl_desc->bInterfaceSubClass = 0x1;
 			info.ctrl_desc->bInterfaceProtocol = 0x03;
 		}
@@ -3111,19 +3111,25 @@ CONFIGFS_ATTR_RO(gsi_, info);
 
 static ssize_t gsi_rndis_wceis_show(struct config_item *item, char *page)
 {
+	int ret;
 	struct f_gsi *gsi = to_gsi_opts(item)->gsi;
 
-	return snprintf(page, PAGE_SIZE, "%d\n", gsi->rndis_use_wceis);
+	ret = sprintf(page, "%d\n",gsi->rndis_use_wceis);
+	return 0;
 }
 
 static ssize_t gsi_rndis_wceis_store(struct config_item *item,
 			const char *page, size_t len)
 {
 	struct f_gsi *gsi = to_gsi_opts(item)->gsi;
-	bool val;
+	u8 val = 0;
+	int ret;
 
-	if (kstrtobool(page, &val))
-		return -EINVAL;
+	ret = kstrtou8(page, 0, &val);
+	if( ret !=0 || val > 1) {
+		pr_err("Wrong value written to wceis attr(%u)\n", val);
+		return len;
+	}
 
 	gsi->rndis_use_wceis = val;
 
@@ -3147,6 +3153,7 @@ static struct config_item_type gsi_func_rndis_type = {
 
 static struct configfs_attribute *gsi_attrs[] = {
 	&gsi_attr_info,
+	&gsi_attr_rndis_wceis,
 	NULL,
 };
 
