@@ -156,6 +156,10 @@ struct sdhci_msm_pltfm_data {
 	u32 ice_clk_min;
 	struct sdhci_msm_pm_qos_data pm_qos_data;
 	bool sdr104_wa;
+
+#ifdef CONFIG_WIFI_CONTROL_FUNC
+	bool use_for_wifi;
+#endif
 };
 
 struct sdhci_msm_bus_vote {
