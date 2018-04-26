@@ -204,7 +204,7 @@ enum {
 	MAX_TYPES
 };
 
-static const struct apsd_result const smblib_apsd_results[] = {
+static const struct apsd_result smblib_apsd_results[] = {
 	[UNKNOWN] = {
 		.name	= "UNKNOWN",
 		.bit	= 0,
@@ -246,6 +246,87 @@ static const struct apsd_result const smblib_apsd_results[] = {
 		.pst	= POWER_SUPPLY_TYPE_USB_HVDCP_3,
 	},
 };
+#endif
+#ifdef CONFIG_QPNP_SMBFG_NEWGEN_EXTENSION
+enum {
+	UNKNOWN,
+	SDP,
+	CDP,
+	DCP,
+	OCP,
+	FLOAT,
+	HVDCP2,
+	HVDCP3,
+	PD,
+	MAX_TYPES
+};
+
+static const struct apsd_result smblib_apsd_results[] = {
+	[UNKNOWN] = {
+		.name	= "UNKNOWN_CHARGER",
+		.bit	= 0,
+		.pst	= POWER_SUPPLY_TYPE_UNKNOWN
+	},
+	[SDP] = {
+		.name	= "USB_SDP_CHARGER",
+		.bit	= SDP_CHARGER_BIT,
+		.pst	= POWER_SUPPLY_TYPE_USB
+	},
+	[CDP] = {
+		.name	= "USB_CDP_CHARGER",
+		.bit	= CDP_CHARGER_BIT,
+		.pst	= POWER_SUPPLY_TYPE_USB_CDP
+	},
+	[DCP] = {
+		.name	= "USB_DCP_CHARGER",
+		.bit	= DCP_CHARGER_BIT,
+		.pst	= POWER_SUPPLY_TYPE_USB_DCP
+	},
+	[OCP] = {
+		.name	= "USB_PROPRIETARY_CHARGER",
+		.bit	= OCP_CHARGER_BIT,
+		.pst	= POWER_SUPPLY_TYPE_USB_DCP
+	},
+	[FLOAT] = {
+		.name	= "USB_FLOATED_CHARGER",
+		.bit	= FLOAT_CHARGER_BIT,
+		.pst	= POWER_SUPPLY_TYPE_USB_DCP
+	},
+	[HVDCP2] = {
+		.name	= "USB_HVDCP_CHARGER",
+		.bit	= DCP_CHARGER_BIT | QC_2P0_BIT,
+		.pst	= POWER_SUPPLY_TYPE_USB_HVDCP
+	},
+	[HVDCP3] = {
+		.name	= "USB_HVDCP_3_CHARGER",
+		.bit	= DCP_CHARGER_BIT | QC_3P0_BIT,
+		.pst	= POWER_SUPPLY_TYPE_USB_HVDCP_3,
+	},
+	[PD] = {
+		.name	= "USB_PD_CHARGER",
+		.bit	= 0xff,
+		.pst	= POWER_SUPPLY_TYPE_USB_PD,
+	},
+};
+
+const char *smblib_somc_get_charger_type(struct smb_charger *chg)
+{
+	const char *charger_type = NULL;
+	int i;
+
+	for (i = UNKNOWN; i < MAX_TYPES; i++) {
+		if (smblib_apsd_results[i].bit ==
+					chg->usb_params.apsd_result_bit) {
+			charger_type = smblib_apsd_results[i].name;
+			break;
+		}
+	}
+	if (!charger_type)
+		charger_type = smblib_apsd_results[UNKNOWN].name;
+
+	return charger_type;
+}
+#endif
 
 static const struct apsd_result *smblib_get_apsd_result(struct smb_charger *chg)
 {
