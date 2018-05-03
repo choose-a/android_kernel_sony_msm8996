@@ -4725,6 +4725,10 @@ static int smbchg_change_usb_supply_type(struct smbchg_chip *chip,
 	}
 
 	if (!chip->skip_usb_notification) {
+#ifdef CONFIG_QPNP_SMBCHARGER_DELAY_UPDATE
+		if (type == POWER_SUPPLY_TYPE_USB_DCP)
+			msleep(100);
+#endif
 		propval.intval = type;
 		chip->usb_psy->set_property(chip->usb_psy,
 				POWER_SUPPLY_PROP_REAL_TYPE,
