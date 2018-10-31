@@ -1428,6 +1428,7 @@ static int msm_compr_playback_open(struct snd_compr_stream *cstream)
 		kfree(pdata->audio_effects[rtd->dai_link->be_id]);
 		pdata->audio_effects[rtd->dai_link->be_id] = NULL;
 		kfree(pdata->sony_hweffect[rtd->dai_link->be_id]);
+		pdata->sony_hweffect[rtd->dai_link->be_id] = NULL;
 		pdata->cstream[rtd->dai_link->be_id] = NULL;
 		kfree(prtd);
 		return -ENOMEM;
@@ -1477,6 +1478,7 @@ static int msm_compr_playback_open(struct snd_compr_stream *cstream)
 		kfree(pdata->audio_effects[rtd->dai_link->be_id]);
 		pdata->audio_effects[rtd->dai_link->be_id] = NULL;
 		kfree(pdata->sony_hweffect[rtd->dai_link->be_id]);
+		pdata->sony_hweffect[rtd->dai_link->be_id] = NULL;
 		kfree(pdata->dec_params[rtd->dai_link->be_id]);
 		pdata->cstream[rtd->dai_link->be_id] = NULL;
 		kfree(prtd);
@@ -1642,9 +1644,12 @@ static int msm_compr_playback_free(struct snd_compr_stream *cstream)
 	q6asm_audio_client_buf_free_contiguous(dir, ac);
 
 	q6asm_audio_client_free(ac);
+
 	if (pdata->audio_effects[soc_prtd->dai_link->be_id] != NULL) {
 		kfree(pdata->audio_effects[soc_prtd->dai_link->be_id]);
 		pdata->audio_effects[soc_prtd->dai_link->be_id] = NULL;
+	}
+	if (pdata->sony_hweffect[soc_prtd->dai_link->be_id] != NULL) {
 		kfree(pdata->sony_hweffect[soc_prtd->dai_link->be_id]);
 		pdata->sony_hweffect[soc_prtd->dai_link->be_id] = NULL;
 	}
