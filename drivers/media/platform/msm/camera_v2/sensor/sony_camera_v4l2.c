@@ -69,8 +69,8 @@
 #define CAMERA_THERMAL_NAME_1	"sony_camera_1"
 #define CAPS_MAX_STR_LEN	32
 
-#define CAM_SENSOR_PINCTRL_STATE_SLEEP "cam_suspend"
-#define CAM_SENSOR_PINCTRL_STATE_DEFAULT "cam_default"
+#define CAM_SENSOR_PINCTRL_STATE_SLEEP		"cam_suspend"
+#define CAM_SENSOR_PINCTRL_STATE_DEFAULT	"cam_default"
 
 struct sony_camera_data {
 	bool				probe_done;
@@ -85,14 +85,20 @@ struct sony_camera_data {
 	struct regulator		*cam_vana;
 	struct regulator		*cam_vdig;
 	struct regulator		*cam_vaf;
+#ifndef CONFIG_ARCH_SONY_TONE
+	struct regulator		*cam_vio_gpio;
+	struct regulator		*cam_vana_gpio;
+	struct regulator		*cam_vdig_gpio;
+	struct regulator		*cam_vaf_gpio;
+#endif
 	struct clk			*clk_handle[2];
 	struct device			info_dev;
 	bool				power_up_done;
-	uint32_t			sof_irq;
-	int				sof_gpio;
 	struct thermal_zone_device	*thermal_zone_dev;
 	int32_t				thermal_sensor_temp;
 	int				thermal_ret_val;
+	uint32_t			sof_irq;
+	int				sof_gpio;
 };
 
 struct camera_read_info {
@@ -125,6 +131,9 @@ struct camera_read_info {
 	uint32_t			focus_lens_stroke_1m_to_macro;
 	uint32_t			focus_lens_stroke_inf_to_macro;
 	uint32_t			focus_calc_type;
+#ifndef CONFIG_ARCH_SONY_TONE
+	uint32_t			focus_wob_time;
+#endif
 	uint32_t			has_3a;
 	uint32_t			has_focus_actuator;
 	uint32_t			has_pdaf;
@@ -137,6 +146,9 @@ struct camera_read_info {
 	uint32_t			has_hw_sof;
 	uint32_t			has_hdr;
 	uint32_t			has_seamless_mode_change;
+#ifndef CONFIG_ARCH_SONY_TONE
+	uint32_t			has_gph;
+#endif
 	uint32_t			pdaf_free_area_num;
 	uint32_t			pdaf_fixed_area_size_w;
 	uint32_t			pdaf_fixed_area_size_h;
@@ -170,6 +182,10 @@ static struct msm_sensor_power_setting sony_power_setting[] = {
 		.delay = 0,
 	},
 };
+
+#if defined(CONFIG_LEDS_QPNP_RGB_SCALE) && (CONFIG_FRONT_CAMERA_LED_SCALE > 0)
+extern int qpnp_led_set_rgb_scale(int scale);
+#endif
 
 static int32_t sony_util_get_context(struct msm_sensor_ctrl_t *s_ctrl)
 {
@@ -247,10 +263,11 @@ static int sony_util_camera_info_init(struct platform_device *pdev, uint16_t id)
 	camera_info[id].subdev_code = val_u32[0];
 
 	rc = of_property_read_u32_array(of_node, "interrupts", &val_u32[0], 2);
-	if (rc < 0)
+	if (rc < 0) {
 		camera_data[id].sof_gpio = -1;
-	else
+	} else {
 		camera_data[id].sof_gpio = val_u32[0];
+	}
 
 	of_node_power_sequence = of_find_node_by_name(of_node,
 					"sony,camera_modules");
@@ -571,6 +588,16 @@ static int sony_util_camera_info_init(struct platform_device *pdev, uint16_t id)
 			goto fail;
 		}
 
+#ifndef CONFIG_ARCH_SONY_TONE
+		rc = of_property_read_u32(of_node_modules,
+			"focus_wob_time",
+			&camera_info[id].modules[i].focus_wob_time);
+
+		if (rc < 0) {
+			LOGE("%s failed %d\n", __func__, __LINE__);
+			goto fail;
+		}
+#endif
 		rc = of_property_read_u32(of_node_modules,
 			"has_3a",
 			&camera_info[id].modules[i].has_3a);
@@ -687,6 +714,17 @@ static int sony_util_camera_info_init(struct platform_device *pdev, uint16_t id)
 			LOGE("%s failed %d\n", __func__, __LINE__);
 			goto fail;
 		}
+
+#ifndef CONFIG_ARCH_SONY_TONE
+		rc = of_property_read_u32(of_node_modules,
+			"has_gph",
+			&camera_info[id].modules[i].has_gph);
+
+		if (rc < 0) {
+			LOGE("%s failed %d\n", __func__, __LINE__);
+			goto fail;
+		}
+#endif
 
 		rc = of_property_read_u32(of_node_modules,
 			"pdaf_free_area_num",
@@ -813,7 +851,7 @@ static int sony_util_camera_info_init(struct platform_device *pdev, uint16_t id)
 					"commands", j,
 					(const char **)(&power_order_name));
 			if (rc < 0) {
-				LOGE("%s failed %d\n", __func__, __LINE__);
+				LOGE("%s failed %d j=%d count=%d\n", __func__, __LINE__, j, count);
 				goto fail;
 			}
 
@@ -821,7 +859,7 @@ static int sony_util_camera_info_init(struct platform_device *pdev, uint16_t id)
 				of_node_modules_power_on, power_order_name,
 				&val_u32[0], 4);
 			if (rc < 0) {
-				LOGE("%s failed %d\n", __func__, __LINE__);
+				LOGE("%s failed %d j=%d count=%d\n", __func__, __LINE__, j, count);
 				goto fail;
 			}
 			camera_info[id].modules[i].seq_on[j].cmd =
@@ -984,6 +1022,60 @@ static int sony_util_vreg_set(struct msm_sensor_ctrl_t *s_ctrl,
 			}
 			data->cam_vaf = vreg;
 		}
+#ifndef CONFIG_ARCH_SONY_TONE
+	} else if (cmd == SONY_CAM_VDIG_GPIO) {
+		if (data->cam_vdig_gpio) {
+			vreg = data->cam_vdig_gpio;
+		} else {
+			vreg = regulator_get(dev, "cam_vdig_gpio");
+			if (IS_ERR(vreg)) {
+				LOGE("could not get cam_vdig_gpio, vreg = %ld\n",
+					PTR_ERR(vreg));
+				rc = -ENODEV;
+				goto exit;
+			}
+			data->cam_vdig_gpio = vreg;
+		}
+	} else if (cmd == SONY_CAM_VIO_GPIO) {
+		if (data->cam_vio_gpio) {
+			vreg = data->cam_vio_gpio;
+		} else {
+			vreg = regulator_get(dev, "cam_vio_gpio");
+			if (IS_ERR(vreg)) {
+				LOGE("could not get cam_vio_gpio, vreg = %ld\n",
+					PTR_ERR(vreg));
+				rc = -ENODEV;
+				goto exit;
+			}
+			data->cam_vio_gpio = vreg;
+		}
+	} else if (cmd == SONY_CAM_VANA_GPIO) {
+		if (data->cam_vana_gpio) {
+			vreg = data->cam_vana_gpio;
+		} else {
+			vreg = regulator_get(dev, "cam_vana_gpio");
+			if (IS_ERR(vreg)) {
+				LOGE("could not get cam_vana_gpio, vreg = %ld\n",
+					PTR_ERR(vreg));
+				rc = -ENODEV;
+				goto exit;
+			}
+			data->cam_vana_gpio = vreg;
+		}
+	} else if (cmd == SONY_CAM_VAF_GPIO) {
+		if (data->cam_vaf_gpio) {
+			vreg = data->cam_vaf_gpio;
+		} else {
+			vreg = regulator_get(dev, "cam_vaf_gpio");
+			if (IS_ERR(vreg)) {
+				LOGE("could not get cam_vaf_gpio, vreg = %ld\n",
+					PTR_ERR(vreg));
+				rc = -ENODEV;
+				goto exit;
+			}
+			data->cam_vaf_gpio = vreg;
+		}
+#endif
 	} else {
 		rc = -EINVAL;
 		LOGE("invalid resource\n");
@@ -998,7 +1090,7 @@ static int sony_util_vreg_set(struct msm_sensor_ctrl_t *s_ctrl,
 				goto set_voltage_fail;
 		}
 		if (op_mode > 0) {
-			rc = regulator_set_optimum_mode(vreg, op_mode);
+			rc = regulator_set_load(vreg, op_mode);
 			if (rc < 0)
 				goto set_voltage_fail;
 		}
@@ -1007,14 +1099,14 @@ static int sony_util_vreg_set(struct msm_sensor_ctrl_t *s_ctrl,
 			goto enable_fail;
 	} else {
 		if (op_mode == 0)
-			(void)regulator_set_optimum_mode(vreg, 0);
+			(void)regulator_set_load(vreg, 0);
 		(void)regulator_disable(vreg);
 		regulator_put(vreg);
 	}
 	goto exit;
 
 enable_fail:
-	(void)regulator_set_optimum_mode(vreg, 0);
+	(void)regulator_set_load(vreg, 0);
 
 set_voltage_fail:
 	regulator_put(vreg);
@@ -1029,6 +1121,16 @@ exit:
 			data->cam_vana = NULL;
 		else if (vreg == data->cam_vaf)
 			data->cam_vaf = NULL;
+#ifndef CONFIG_ARCH_SONY_TONE
+		else if (vreg == data->cam_vdig_gpio)
+			data->cam_vdig_gpio = NULL;
+		else if (vreg == data->cam_vio_gpio)
+			data->cam_vio_gpio = NULL;
+		else if (vreg == data->cam_vana_gpio)
+			data->cam_vana_gpio = NULL;
+		else if (vreg == data->cam_vaf_gpio)
+			data->cam_vaf_gpio = NULL;
+#endif
 	}
 
 	if (rc < 0)
@@ -1215,6 +1317,12 @@ static int sony_util_power_ctrl(struct msm_sensor_ctrl_t *s_ctrl,
 		case SONY_CAM_VIO:
 		case SONY_CAM_VANA:
 		case SONY_CAM_VAF:
+#ifndef CONFIG_ARCH_SONY_TONE
+		case SONY_CAM_VIO_GPIO:
+		case SONY_CAM_VANA_GPIO:
+		case SONY_CAM_VDIG_GPIO:
+		case SONY_CAM_VAF_GPIO:
+#endif
 			rc = sony_util_vreg_set(s_ctrl,
 				data, seq->cmd, seq->val1, seq->val2);
 			break;
@@ -1357,7 +1465,7 @@ exit:
 }
 
 static int sony_camera_thermal_get_temp(struct thermal_zone_device *thermal,
-			unsigned long *temp)
+		int *temp)
 {
 	int rc = 0;
 	int id = 0;
@@ -1369,10 +1477,10 @@ static int sony_camera_thermal_get_temp(struct thermal_zone_device *thermal,
 	}
 
 	if (!strncmp(thermal->type, CAMERA_THERMAL_NAME_0,
-					sizeof(CAMERA_THERMAL_NAME_0))) {
+		sizeof(CAMERA_THERMAL_NAME_0))) {
 		id = 0;
 	} else if (!strncmp(thermal->type, CAMERA_THERMAL_NAME_1,
-					sizeof(CAMERA_THERMAL_NAME_1))) {
+		sizeof(CAMERA_THERMAL_NAME_1))) {
 		id = 1;
 	} else {
 		rc = -EPERM;
@@ -1382,8 +1490,8 @@ static int sony_camera_thermal_get_temp(struct thermal_zone_device *thermal,
 	if (camera_data[id].thermal_ret_val < 0)
 		rc = camera_data[id].thermal_ret_val;
 	else
-		*temp = (unsigned long)camera_data[id].thermal_sensor_temp;
-	LOGD("%s %d, id = %d rc = %d *temp = %ld\n",
+		*temp = (int)camera_data[id].thermal_sensor_temp;
+		LOGD("%s %d, id = %d rc = %d *temp = %d\n",
 			__func__, __LINE__, id, rc, *temp);
 
 error:
@@ -1481,6 +1589,10 @@ static ssize_t sony_camera_info_read(struct device *ldev,
 				camera_data[id].module->focus_lens_stroke_inf_to_macro;
 			info->focus_calc_type =
 				camera_data[id].module->focus_calc_type;
+#ifndef CONFIG_ARCH_SONY_TONE
+			info->focus_wob_time =
+				camera_data[id].module->focus_wob_time;
+#endif
 			info->has_3a =
 				camera_data[id].module->has_3a;
 			info->has_focus_actuator =
@@ -1505,6 +1617,10 @@ static ssize_t sony_camera_info_read(struct device *ldev,
 				camera_data[id].module->has_hdr;
 			info->has_seamless_mode_change =
 				camera_data[id].module->has_seamless_mode_change;
+#ifndef CONFIG_ARCH_SONY_TONE
+			info->has_gph =
+				camera_data[id].module->has_gph;
+#endif
 			info->pdaf_free_area_num =
 				camera_data[id].module->pdaf_free_area_num;
 			info->pdaf_fixed_area_size_w =
@@ -1544,7 +1660,7 @@ static ssize_t sony_camera_info_write(struct device *ldev,
 			camera_data[id].thermal_ret_val = 0;
 			info_len = sizeof(struct camera_write_info);
 			LOGD("%d thermal_sensor_temp[%d] = %d\n", __LINE__, id,
-					camera_data[id].thermal_sensor_temp);
+				camera_data[id].thermal_sensor_temp);
 		}
 	}
 	return info_len;
@@ -1930,7 +2046,7 @@ static irqreturn_t sony_sensor_sof_irq(int irq, void *handle)
 	struct msm_sensor_ctrl_t *s_ctrl = (struct msm_sensor_ctrl_t *)handle;
 	struct timespec ts;
 
-	ktime_get_ts(&ts);
+	get_monotonic_boottime(&ts);
 	s_ctrl->sof_count++;
 	if (s_ctrl->sof_count > 0xFFFFFFF0)
 		s_ctrl->sof_count = 1;
@@ -1980,9 +2096,7 @@ static int sony_sensor_power_up(struct msm_sensor_ctrl_t *s_ctrl)
 			pr_err("%s:%d cannot set pin to active state",
 				__func__, __LINE__);
 	}
-	LOGE("%s: id = %d, sof_gpio %d %p\n",
-		__func__, id, camera_data[id].sof_gpio,
-			dev_name(camera_data[id].d));
+	LOGE("%s: id = %d, sof_gpio %d %p\n", __func__, id, camera_data[id].sof_gpio, dev_name(camera_data[id].d));
 	if (camera_data[id].sof_gpio >= 0) {
 		camera_data[id].sof_irq = gpio_to_irq(camera_data[id].sof_gpio);
 		rc = request_threaded_irq(camera_data[id].sof_irq, NULL,
@@ -2024,6 +2138,12 @@ static int sony_sensor_power_up(struct msm_sensor_ctrl_t *s_ctrl)
 		rc = s_ctrl->func_tbl->sensor_match_id(s_ctrl);
 	camera_data[id].power_up_done = true;
 	camera_data[id].thermal_ret_val = -EINVAL;
+
+#if defined(CONFIG_LEDS_QPNP_RGB_SCALE) && (CONFIG_FRONT_CAMERA_LED_SCALE > 0)
+	if (s_ctrl->sensordata->sensor_info->position == 1) {
+		qpnp_led_set_rgb_scale(CONFIG_FRONT_CAMERA_LED_SCALE);
+	}
+#endif
 
 exit:
 	mutex_unlock(&af_standby_mutex);
@@ -2078,6 +2198,12 @@ static int sony_sensor_power_down(struct msm_sensor_ctrl_t *s_ctrl)
 	camera_data[id].power_up_done = false;
 	mutex_unlock(&af_standby_mutex);
 	camera_data[id].thermal_ret_val = -ENODEV;
+
+#if defined(CONFIG_LEDS_QPNP_RGB_SCALE) && (CONFIG_FRONT_CAMERA_LED_SCALE > 0)
+	if (s_ctrl->sensordata->sensor_info->position == 1) {
+		qpnp_led_set_rgb_scale(100);
+	}
+#endif
 
 	return rc;
 }
@@ -2300,10 +2426,10 @@ static struct sony_camera_data camera_data[] = {
 					ARRAY_SIZE(sony_sensor_subdev_info),
 			.func_tbl = &sony_sensor_func_tbl,
 		},
-		.sof_irq = 0,
-		.sof_gpio = -1,
 		.thermal_sensor_temp = 0,
 		.thermal_ret_val = -ENODEV,
+		.sof_irq = 0,
+		.sof_gpio = -1,
 	},
 	{
 		.s_ctrl = {
@@ -2318,10 +2444,10 @@ static struct sony_camera_data camera_data[] = {
 					ARRAY_SIZE(sony_sensor_subdev_info),
 			.func_tbl = &sony_sensor_func_tbl,
 		},
-		.sof_irq = 0,
-		.sof_gpio = -1,
 		.thermal_sensor_temp = 0,
 		.thermal_ret_val = -ENODEV,
+		.sof_irq = 0,
+		.sof_gpio = -1,
 	},
 };
 
