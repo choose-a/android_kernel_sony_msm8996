@@ -341,6 +341,7 @@ int pil_assign_mem_to_linux(struct pil_desc *desc, phys_addr_t addr,
 							size_t size)
 {
 	int ret;
+#ifndef CONFIG_MSM_PIL_LEGACY
 	int srcVM[1] = {desc->subsys_vmid};
 	int destVM[1] = {VMID_HLOS};
 	int destVMperm[1] = {PERM_READ | PERM_WRITE | PERM_EXEC};
