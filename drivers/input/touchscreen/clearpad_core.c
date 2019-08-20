@@ -5330,7 +5330,7 @@ static int clearpad_do_calibration(struct clearpad_t *this, int mode,
 	unsigned long timeout;
 	int rc = 0;
 	int reset_rc = 0;
-	bool calibrate = false;
+	bool calibrate;
 	u8 status, bit, need_bit;
 
 	switch (mode) {
