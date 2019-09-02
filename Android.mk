@@ -15,9 +15,6 @@
 
 # Android makefile to build kernel as a part of Android Build
 
-ifeq ($(BUILD_KERNEL),true)
-ifeq ($(PRODUCT_PLATFORM_SOD),true)
-
 KERNEL_SRC := $(call my-dir)
 
 ## Internal variables
@@ -37,7 +34,7 @@ KERNEL_ARCH := $(TARGET_KERNEL_ARCH)
 endif
 
 # kernel configuration - mandatory:
-TARGET_KERNEL_CONFIG ?= $(notdir $(wildcard $(KERNEL_SRC)/arch/$(KERNEL_ARCH)/configs/aosp_*_$(TARGET_DEVICE)_defconfig))
+TARGET_KERNEL_CONFIG ?= $(notdir $(wildcard $(KERNEL_SRC)/arch/$(KERNEL_ARCH)/configs/$(TARGET_DEVICE)_defconfig))
 KERNEL_DEFCONFIG := $(TARGET_KERNEL_CONFIG)
 
 KERNEL_DEFCONFIG_ARCH := $(KERNEL_ARCH)
@@ -251,6 +248,3 @@ ifeq ($(TARGET_NEEDS_DTBOIMAGE),true)
 $(PRODUCT_OUT)/dtbo.img: $(KERNEL_DTBO_OUT)
 	cp $(KERNEL_DTBO_OUT) $(PRODUCT_OUT)/dtbo.img
 endif # TARGET_NEEDS_DTBOIMAGE
-
-endif # Sony AOSP devices
-endif # BUILD_KERNEL
