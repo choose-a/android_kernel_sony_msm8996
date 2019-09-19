@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, 2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -8,6 +8,11 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ */
+/*
+ * NOTE: This file has been modified by Sony Mobile Communications Inc.
+ * Modifications are Copyright (c) 2015 Sony Mobile Communications Inc,
+ * and licensed under the license of the file.
  */
 
 #ifndef QPNP_PON_H
@@ -51,7 +56,6 @@ enum pon_power_off_type {
 };
 
 enum pon_restart_reason {
-	/* 0 ~ 31 for common defined features */
 	PON_RESTART_REASON_UNKNOWN		= 0x00,
 	PON_RESTART_REASON_RECOVERY		= 0x01,
 	PON_RESTART_REASON_BOOTLOADER		= 0x02,
@@ -59,38 +63,25 @@ enum pon_restart_reason {
 	PON_RESTART_REASON_DMVERITY_CORRUPTED	= 0x04,
 	PON_RESTART_REASON_DMVERITY_ENFORCE	= 0x05,
 	PON_RESTART_REASON_KEYS_CLEAR		= 0x06,
-
-	/* 32 ~ 63 for OEMs/ODMs secific features */
-	PON_RESTART_REASON_OEM_MIN		= 0x20,
-	PON_RESTART_REASON_OEM_MAX		= 0x3f,
 };
 
-#ifdef CONFIG_INPUT_QPNP_POWER_ON
-int qpnp_pon_system_pwr_off(enum pon_power_off_type type);
+#ifdef CONFIG_QPNP_POWER_ON
 int qpnp_pon_is_warm_reset(void);
 int qpnp_pon_trigger_config(enum pon_trigger_source pon_src, bool enable);
-int qpnp_pon_wd_config(bool enable);
 int qpnp_pon_set_restart_reason(enum pon_restart_reason reason);
 bool qpnp_pon_check_hard_reset_stored(void);
-
 #ifdef CONFIG_PON_SOMC_ORG
 int qpnp_pon_dvdd_shutdown(void);
 #else
-static inline int qpnp_pon_dvdd_shutdown(void) { return -ENODEV; }
-#endif /* CONFIG_PON_SOMC_ORG */
-
-#else
-static int qpnp_pon_system_pwr_off(enum pon_power_off_type type)
+static inline int qpnp_pon_dvdd_shutdown(void)
 {
 	return -ENODEV;
 }
+#endif /* CONFIG_PON_SOMC_ORG */
+#else
 static inline int qpnp_pon_is_warm_reset(void) { return -ENODEV; }
 static inline int qpnp_pon_trigger_config(enum pon_trigger_source pon_src,
 							bool enable)
-{
-	return -ENODEV;
-}
-int qpnp_pon_wd_config(bool enable)
 {
 	return -ENODEV;
 }
@@ -102,6 +93,12 @@ static inline bool qpnp_pon_check_hard_reset_stored(void)
 {
 	return false;
 }
+#ifdef CONFIG_PON_SOMC_ORG
+static inline int qpnp_pon_dvdd_shutdown(void)
+{
+	return -ENODEV;
+}
+#endif /* CONFIG_PON_SOMC_ORG */
 #endif
 
 #endif

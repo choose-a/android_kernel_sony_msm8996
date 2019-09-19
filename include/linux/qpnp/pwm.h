@@ -9,6 +9,11 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
+/*
+ * NOTE: This file has been modified by Sony Mobile Communications Inc.
+ * Modifications are Copyright (c) 2015 Sony Mobile Communications Inc,
+ * and licensed under the license of the file.
+ */
 
 #ifndef __QPNP_PWM_H__
 #define __QPNP_PWM_H__
@@ -134,6 +139,7 @@ struct lut_params {
 	int lut_pause_lo;
 	int ramp_step_ms;
 	int flags;
+	bool use_duration;
 };
 
 #if IS_ENABLED(CONFIG_PWM_QPNP)

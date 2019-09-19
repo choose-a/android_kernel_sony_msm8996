@@ -1760,6 +1760,25 @@ int32_t qpnp_adc_tm_scale_therm_voltage_pu2_decidegc(struct qpnp_vadc_chip *dev,
 int32_t qpnp_adc_tm_scale_voltage_therm_pu2_decidegc(struct qpnp_vadc_chip *dev,
 				uint32_t reg, int64_t *result);
 /**
+ * qpnp_adc_tm_scale_therm_voltage_pu2_decidegc() - Performs reverse calibration
+ *		and convert given temperature to voltage on supported
+ *		thermistor channels using 100k pull-up.
+ * @dev:	Structure device for qpnp vadc
+ * @param:	The input temperature values.
+ */
+int32_t qpnp_adc_tm_scale_therm_voltage_pu2_decidegc(struct qpnp_vadc_chip *dev,
+				struct qpnp_adc_tm_config *param);
+/**
+ * qpnp_adc_tm_scale_voltage_therm_pu2_decidegc() - Performs reverse calibration
+ *		and converts the given ADC code to temperature for
+ *		thermistor channels using 100k pull-up.
+ * @dev:	Structure device for qpnp vadc
+ * @reg:	The input ADC code.
+ * @result:	The physical measurement temperature on the thermistor.
+ */
+int32_t qpnp_adc_tm_scale_voltage_therm_pu2_decidegc(struct qpnp_vadc_chip *dev,
+				uint32_t reg, int64_t *result);
+/**
  * qpnp_adc_usb_scaler() - Performs reverse calibration on the low/high
  *		voltage threshold values passed by the client.
  *		The function applies ratiometric calibration on the
@@ -2092,6 +2111,14 @@ static inline int32_t qpnp_adc_tm_scale_voltage_therm_pu2(
 				struct qpnp_vadc_chip *dev,
 			const struct qpnp_adc_properties *adc_prop,
 			uint32_t reg, int64_t *result)
+{ return -ENXIO; }
+static inline int32_t qpnp_adc_tm_scale_therm_voltage_pu2_decidegc(
+				struct qpnp_vadc_chip *dev,
+				struct qpnp_adc_tm_config *param)
+{ return -ENXIO; }
+static inline int32_t qpnp_adc_tm_scale_voltage_therm_pu2_decidegc(
+				struct qpnp_vadc_chip *dev,
+				uint32_t reg, int64_t *result)
 { return -ENXIO; }
 static inline int32_t qpnp_adc_tm_scale_therm_voltage_pu2_decidegc(
 				struct qpnp_vadc_chip *dev,

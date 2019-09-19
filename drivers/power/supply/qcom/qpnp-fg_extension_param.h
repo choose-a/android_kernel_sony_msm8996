@@ -22,24 +22,24 @@
 struct somc_update_data {
 	int			capacity;
 	int			temp_period_update_ms;
-	u32			battery_soc;
-	u32			cc_soc;
-	u32			sw_cc_soc;
-	u32			soc_system;
-	u32			soc_monotonic;
+	int			battery_soc;
+	int			cc_soc;
+	int			sw_cc_soc;
+	int			soc_system;
+	int			soc_monotonic;
 	bool			integrity_bit;
 	u8			soc_restart;
 	u16			vbat_predict;
 	int64_t			rslow;
-	u32			soc_cutoff;
-	u32			soc_full;
+	int			soc_cutoff;
+	int			soc_full;
 	bool			set_cc_soc_coeff;
 	u8			resume_soc_raw;
 };
 
 struct somc_learning_data {
-	int			last_battery_soc;
-	int			last_capacity;
+	int64_t			charge_full_raw;
+	ktime_t			timestamp;
 };
 
 struct somc_jeita {

@@ -44,6 +44,7 @@ module_param(id_polling_state, bool, S_IRUSR);
 static unsigned int id_polling_timeout;
 module_param(id_polling_timeout, uint, S_IRUSR | S_IWUSR);
 
+static bool id_polling_enabled;
 static bool start_id_polling;
 
 /*
@@ -58,6 +59,19 @@ static void update_typec_otg_status(struct smbchg_chip *chip, int mode,
 /*
  * qpnp-smbcharger_extension_usb.c functions
  */
+static int set_id_polling_enabled(const char *val,
+						const struct kernel_param *kp)
+{
+	pr_debug("ignore writing to id_polling_enabled\n");
+	return 0;
+}
+static struct kernel_param_ops id_polling_enabled_ops = {
+	.set = set_id_polling_enabled,
+	.get = param_get_bool,
+};
+module_param_cb(id_polling_enabled, &id_polling_enabled_ops,
+						&id_polling_enabled, S_IRUSR);
+
 static void somc_chg_usbid_start_polling(struct usb_somc_params *params);
 static void somc_chg_usbid_stop_polling(struct usb_somc_params *params);
 static int set_start_id_polling(const char *val, const struct kernel_param *kp)
@@ -73,6 +87,16 @@ static int set_start_id_polling(const char *val, const struct kernel_param *kp)
 	}
 
 	ret = param_set_bool(val, kp);
+
+	if (!id_polling_enabled) {
+		if (start_id_polling) {
+			pr_warn("id polling is not enabled\n");
+			start_id_polling = false;
+			return -EPERM;
+		} else {
+			return ret;
+		}
+	}
 
 	usb_params = musb_params;
 	chip = container_of(usb_params, struct smbchg_chip, usb_params);
@@ -146,6 +170,11 @@ static void somc_chg_usbid_start_polling(struct usb_somc_params *usb_params)
 						struct smbchg_chip,
 						usb_params);
 
+	if (!id_polling_enabled) {
+		pr_warn("id polling is not enabled\n");
+		return;
+	}
+
 	id_polling_state = true;
 
 	dev_dbg(chip->dev, "queue id polling\n");
@@ -191,6 +220,11 @@ out:
 static void somc_chg_usbid_stop_polling(struct usb_somc_params *usb_params)
 {
 	struct somc_typec_mode_ctrl *typecctrl = &usb_params->typecctrl;
+
+	if (!id_polling_enabled) {
+		pr_warn("id polling is not enabled\n");
+		return;
+	}
 
 	if (typecctrl->user_request_polling)
 		return;
@@ -473,6 +507,11 @@ static int somc_usb_register(struct smbchg_chip *chip)
 	start_id_polling = false;
 	id_polling_timeout = ID_POLLING_TIMEOUT_DEFAULT;
 	force_id_polling_on = false;
+
+	id_polling_enabled = of_property_read_bool(chip->dev->of_node,
+						"somc,id-polling-enabled");
+	if (id_polling_enabled)
+		pr_smb(PR_SOMC, "id_polling_enabled\n");
 
 	pr_smb(PR_MISC, "somc usb register success\n");
 	return 0;

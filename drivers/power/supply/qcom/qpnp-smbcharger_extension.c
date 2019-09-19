@@ -7,7 +7,7 @@
  * of the License, or (at your option) any later version.
  */
 /*
- * Copyright (C) 2015 Sony Mobile Communications Inc.
+ * Copyright (C) 2017 Sony Mobile Communications Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2, as
@@ -71,13 +71,6 @@ enum temp_status {
 	TEMP_STATUS_WARM,
 	TEMP_STATUS_HOT,
 	TEMP_STATUS_NUM,
-};
-
-enum voters_type {
-	VOTERS_FCC = 1,
-	VOTERS_ICL,
-	VOTERS_EN,
-	VOTERS_BATTCHG
 };
 
 static int somc_debug_mask = PR_INFO;
@@ -242,20 +235,6 @@ abort:
 	return rc;
 }
 
-#define DEFAULT_BATT_CHARGE_FULL	0
-static int somc_chg_get_prop_batt_charge_full(struct smbchg_chip *chip)
-{
-	int capacity, rc;
-
-	rc = get_property_from_fg(chip,
-			POWER_SUPPLY_PROP_CHARGE_FULL, &capacity);
-	if (rc) {
-		pr_smb_ext(PR_STATUS, "Couldn't get capacityl rc = %d\n", rc);
-		capacity = DEFAULT_BATT_CHARGE_FULL;
-	}
-	return capacity;
-}
-
 #define DEFAULT_BATT_CHARGE_FULL_DESIGN	0
 static int somc_chg_get_prop_batt_charge_full_design(struct smbchg_chip *chip)
 {
@@ -376,6 +355,12 @@ static void somc_chg_lrc_check(struct smbchg_chip *chip)
 		somc_chg_lrc_vote(chip, retcode);
 
 	params->lrc.status = retcode;
+
+	if (params->lrc.fake_capacity && soc > params->lrc.socmax)
+		vote(chip->usb_suspend_votable, LRC_OVER_SOC_EN_VOTER, true, 0);
+	else
+		vote(chip->usb_suspend_votable, LRC_OVER_SOC_EN_VOTER,
+								false, 0);
 	return;
 
 exit:
@@ -877,6 +862,8 @@ static void somc_chg_apsd_rerun_check_work(struct work_struct *work)
 	int rc;
 
 	if (somc_chg_is_usb_uv_hvdcp(chip)) {
+		somc_chg_charge_error_event(chip,
+					CHGERR_USBIN_UV_CONNECTED_HVDCP);
 		rc = somc_chg_apsd_wait_rerun(chip);
 		if (rc)
 			dev_err(chip->dev, "APSD rerun error rc=%d\n", rc);
@@ -897,6 +884,7 @@ static void somc_chg_apsd_rerun_check(struct smbchg_chip *chip)
 				msecs_to_jiffies(RERUN_DELAY_MS));
 }
 
+#if 0
 static void somc_chg_apsd_rerun(struct smbchg_chip *chip)
 {
 	struct chg_somc_params *params = &chip->somc_params;
@@ -906,6 +894,7 @@ static void somc_chg_apsd_rerun(struct smbchg_chip *chip)
 		queue_delayed_work(params->apsd.wq, &params->apsd.rerun_w,
 					msecs_to_jiffies(RERUN_DELAY_MS));
 }
+#endif
 
 static void somc_chg_apsd_rerun_work(struct work_struct *work)
 {
@@ -1269,6 +1258,8 @@ static void somc_chg_input_current_worker_start(struct smbchg_chip *chip)
 
 static void somc_chg_input_current_state(struct work_struct *work)
 {
+	const char *icl_voter;
+	const char *fcc_voter;
 	int aicl_ma = 0;
 
 	struct smbchg_chip *chip = container_of(work,
@@ -1276,17 +1267,16 @@ static void somc_chg_input_current_state(struct work_struct *work)
 			somc_params.input_current.input_current_work.work);
 	struct chg_somc_params *params = &chip->somc_params;
 
-	const char *icl_voter
-		= get_effective_client_locked(chip->usb_icl_votable);
-	const char *fcc_voter
-		= get_effective_client_locked(chip->fcc_votable);
-
 	if (!chip->usb_present)
 		return;
 
-	if (get_prop_charge_type(chip) == POWER_SUPPLY_CHARGE_TYPE_FAST &&
-		(strcmp(icl_voter, PSY_ICL_VOTER) == 0) &&
-		(strcmp(fcc_voter, BATT_TYPE_FCC_VOTER) == 0)) {
+	icl_voter = get_effective_client(chip->usb_icl_votable);
+	fcc_voter = get_effective_client(chip->fcc_votable);
+
+	if (get_prop_charge_type(chip) ==
+				 POWER_SUPPLY_CHARGE_TYPE_FAST &&
+				!strcmp(icl_voter, PSY_ICL_VOTER) &&
+				!strcmp(fcc_voter, BATT_TYPE_FCC_VOTER)) {
 		aicl_ma = smbchg_get_aicl_level_ma(chip);
 		if (aicl_ma) {
 			params->input_current.input_current_cnt++;
@@ -1305,60 +1295,91 @@ static void somc_chg_input_current_state(struct work_struct *work)
 			msecs_to_jiffies(INPUT_CURRENT_STATE_DELAY_MS));
 }
 
-#define PRINTVOTE(buffer, sz, vot, what) \
-	sz += scnprintf(buffer + sz, (PAGE_SIZE - size), \
-		"%d,", get_client_vote(vot, what));
-
-
 static ssize_t somc_chg_output_voter_param(struct smbchg_chip *chip,
 			char *buf, int buf_size,
-			struct votable *votable,
-			enum voters_type vtype)
+			struct votable *votable)
 {
-	int size = 0;
+	int i, size = 0;
 
-	switch (vtype) {
-		case VOTERS_FCC:
-			PRINTVOTE(buf, size, votable, ESR_PULSE_FCC_VOTER);
-			PRINTVOTE(buf, size, votable, BATT_TYPE_FCC_VOTER);
-			PRINTVOTE(buf, size, votable,RESTRICTED_CHG_FCC_VOTER);
-			PRINTVOTE(buf, size, votable, TEMP_FCC_VOTER);
-			PRINTVOTE(buf, size, votable, THERMAL_FCC_VOTER);
-			PRINTVOTE(buf, size, votable, STEP_FCC_VOTER);
-			PRINTVOTE(buf, size, votable, QNS_FCC_VOTER);
-			break;
-		case VOTERS_ICL:
-			PRINTVOTE(buf, size, votable, PSY_ICL_VOTER);
-			PRINTVOTE(buf, size, votable, THERMAL_ICL_VOTER);
-			PRINTVOTE(buf, size, votable, HVDCP_ICL_VOTER);
-			PRINTVOTE(buf, size, votable, USER_ICL_VOTER);
-			PRINTVOTE(buf, size, votable, WEAK_CHARGER_ICL_VOTER);
-			PRINTVOTE(buf, size, votable, SW_AICL_ICL_VOTER);
-			PRINTVOTE(buf, size, votable,
-					CHG_SUSPEND_WORKAROUND_ICL_VOTER);
-			break;
-		case VOTERS_EN:
-			PRINTVOTE(buf, size, votable, USER_EN_VOTER);
-			PRINTVOTE(buf, size, votable, POWER_SUPPLY_EN_VOTER);
-			PRINTVOTE(buf, size, votable, USB_EN_VOTER);
-			PRINTVOTE(buf, size, votable, THERMAL_EN_VOTER);
-			PRINTVOTE(buf, size, votable, OTG_EN_VOTER);
-			PRINTVOTE(buf, size, votable, WEAK_CHARGER_EN_VOTER);
-			PRINTVOTE(buf, size, votable, FAKE_BATTERY_EN_VOTER);
-			PRINTVOTE(buf, size, votable, LOW_BATT_EN_VOTER);
-			break;
-		case VOTERS_BATTCHG:
-			PRINTVOTE(buf, size, votable, BATTCHG_USER_EN_VOTER);
-			PRINTVOTE(buf, size, votable,
-					BATTCHG_UNKNOWN_BATTERY_EN_VOTER);
-			PRINTVOTE(buf, size, votable, BATTCHG_LRC_EN_VOTER);
-			PRINTVOTE(buf, size, votable, BATTCHG_SMART_EN_VOTER);
-			break;
-		default:
-			break;
-	}
-
+	for (i = 0; i < len_fcc; i++)
+		size += scnprintf(buf + size, (buf_size - size),
+				"%d,", get_client_vote(votable, fcc_voters[i]));
+	size += scnprintf(buf + size, buf_size - size,
+			"%d", get_effective_result(votable));
 	return size;
+}
+
+static void somc_chg_charge_error_event(struct smbchg_chip *chip,
+							u32 chgerr_evt)
+{
+	struct somc_charge_error *charge_error =
+					&chip->somc_params.charge_error;
+
+	if (!(charge_error->status & chgerr_evt)) {
+		charge_error->status |= chgerr_evt;
+		pr_smb(PR_SOMC, "send charge error status (%08x)\n",
+							charge_error->status);
+		power_supply_changed(chip->batt_psy);
+	}
+}
+
+static void somc_chg_set_last_uv_time(struct smbchg_chip *chip)
+{
+	struct somc_charge_error *charge_error =
+					&chip->somc_params.charge_error;
+
+	charge_error->last_uv_time_kt = ktime_get_boottime();
+}
+
+#define UV_PERIOD_VERY_SHORT_MS		35
+#define UNACCEPTABLE_SHORT_UV_COUNT	2
+static void somc_chg_check_short_uv(struct smbchg_chip *chip)
+{
+	ktime_t now_kt, uv_period_kt;
+	s64 uv_period_ms;
+	struct somc_charge_error *charge_error =
+					&chip->somc_params.charge_error;
+
+	now_kt = ktime_get_boottime();
+	uv_period_kt = ktime_sub(now_kt, charge_error->last_uv_time_kt);
+	uv_period_ms = ktime_to_ms(uv_period_kt);
+	if (uv_period_ms > UV_PERIOD_VERY_SHORT_MS)
+		return;
+
+	charge_error->short_uv_count++;
+	if (charge_error->short_uv_count == UNACCEPTABLE_SHORT_UV_COUNT)
+		somc_chg_charge_error_event(chip, CHGERR_USBIN_SHORT_UV);
+}
+
+static void somc_chg_reset_charge_error_status_work(struct work_struct *work)
+{
+	struct somc_charge_error *charge_error = container_of(work,
+						struct somc_charge_error,
+						status_reset_work.work);
+
+	charge_error->status = 0;
+	charge_error->last_uv_time_kt = ktime_set(0, 0);
+	charge_error->short_uv_count = 0;
+}
+
+#define CHGERR_STS_RESET_DELAY_MS	4000
+static void somc_chg_start_charge_error_status_resetting(
+						struct smbchg_chip *chip)
+{
+	struct somc_charge_error *charge_error =
+					&chip->somc_params.charge_error;
+
+	schedule_delayed_work(&charge_error->status_reset_work,
+				msecs_to_jiffies(CHGERR_STS_RESET_DELAY_MS));
+}
+
+static void somc_chg_cancel_charge_error_status_resetting(
+						struct smbchg_chip *chip)
+{
+	struct somc_charge_error *charge_error =
+					&chip->somc_params.charge_error;
+
+	cancel_delayed_work_sync(&charge_error->status_reset_work);
 }
 
 static ssize_t somc_chg_param_show(struct device *dev,
@@ -1663,20 +1684,19 @@ static ssize_t somc_chg_param_show(struct device *dev,
 		break;
 	case ATTR_IBAT_VOTER:
 		size = somc_chg_output_voter_param(chip, buf, PAGE_SIZE,
-				chip->fcc_votable, VOTERS_FCC);
+				chip->fcc_votable);
 		break;
 	case ATTR_USBIN_VOTER:
 		size = somc_chg_output_voter_param(chip, buf, PAGE_SIZE,
-				chip->usb_icl_votable, VOTERS_ICL);
+				chip->usb_icl_votable);
 		break;
 	case ATTR_USB_VOTER:
 		size = somc_chg_output_voter_param(chip, buf, PAGE_SIZE,
-				chip->usb_suspend_votable, VOTERS_EN);
+				chip->usb_suspend_votable);
 		break;
 	case ATTR_BATTCHG_VOTER:
 		size = somc_chg_output_voter_param(chip, buf, PAGE_SIZE,
-				chip->battchg_suspend_votable,
-				VOTERS_BATTCHG);
+				chip->battchg_suspend_votable);
 		break;
 	case ATTR_PULSE_CNT:
 		size = scnprintf(buf, PAGE_SIZE, "%d\n", chip->pulse_cnt);
@@ -1759,6 +1779,8 @@ static void somc_chg_init(struct chg_somc_params *params)
 			somc_chg_apsd_rerun_check_work);
 	INIT_DELAYED_WORK(&params->apsd.rerun_w,
 			somc_chg_apsd_rerun_work);
+	INIT_DELAYED_WORK(&params->charge_error.status_reset_work,
+			somc_chg_reset_charge_error_status_work);
 	pr_smb_ext(PR_INFO, "somc chg init success\n");
 }
 

@@ -33,13 +33,9 @@
 #include <linux/regulator/of_regulator.h>
 #include <linux/qpnp/qpnp-revid.h>
 #include <linux/regulator/qpnp-labibb-regulator.h>
-
-#ifdef CONFIG_REGULATOR_QPNP_LABIBB_SOMC
-#include <linux/regulator/qpnp-labibb-regulator.h>
-#endif
 #ifdef CONFIG_SOMC_LCD_OCP_ENABLED
 #include <linux/interrupt.h>
-#include <linux/input/qpnp-power-on.h>
+#include <linux/qpnp/power-on.h>
 #endif /* CONFIG_SOMC_LCD_OCP_ENABLED */
 
 #define QPNP_LABIBB_REGULATOR_DRIVER_NAME	"qcom,qpnp-labibb-regulator"
@@ -156,9 +152,9 @@
 #define LAB_CURRENT_LIMIT_EN_BIT	BIT(7)
 #define LAB_OVERRIDE_CURRENT_MAX_BIT	BIT(3)
 
-#ifdef CONFIG_REGULATOR_QPNP_LABIBB_SOMC
+#ifdef SOMC_LABIBB_REGULATOR_ORG_IMPL
 #define LAB_CURRENT_LIMIT_OVERRIDE	BIT(3)
-#endif /* CONFIG_REGULATOR_QPNP_LABIBB_SOMC */
+#endif /* SOMC_LABIBB_REGULATOR_ORG_IMPL */
 
 /* REG_LAB_CURRENT_SENSE */
 #define LAB_CURRENT_SENSE_GAIN_MASK	GENMASK(1, 0)
@@ -397,25 +393,7 @@
 #define SWIRE_DEFAULT_IBB_PS_ENABLE_DLY_MS	200
 #define IBB_HW_DEFAULT_SLEW_RATE		12000
 
-
 #ifdef CONFIG_SOMC_LCD_OCP_ENABLED
-/* request_irq */
-#define REQUEST_IRQ(chip, devnode, irq_num, irq_name, irq_handler, flags, rc)\
-do {									\
-	irq_num = of_irq_get_byname(devnode, irq_name);			\
-	if (irq_num < 0) {						\
-		dev_err(chip->dev, "Unable to get " irq_name " irq\n");	\
-		return -ENXIO;						\
-	}								\
-	rc = devm_request_irq(&chip->pdev->dev, irq_num, irq_handler,	\
-		flags, irq_name, chip);					\
-	if (rc < 0) {							\
-		dev_err(chip->dev, "Unable to request " irq_name " irq: %d\n",\
-				rc);					\
-		return -ENXIO;						\
-	}								\
-} while (0)								\
-
 /* enable_irq */
 #define ENABLE_IRQ(irq_num)						\
 do {									\
@@ -430,19 +408,16 @@ do {									\
 	disable_irq_nosync(irq_num);					\
 } while (0)
 
-#define IRQF_LAB_FLAGS	(IRQF_ONESHOT | IRQF_TRIGGER_LOW)
-#define IRQF_IBB_FLAGS	(IRQF_ONESHOT | IRQF_TRIGGER_HIGH)
+#define IRQF_LAB_FLAGS	(IRQF_DISABLED | IRQF_ONESHOT | IRQF_TRIGGER_LOW)
+#define IRQF_IBB_FLAGS	(IRQF_DISABLED | IRQF_ONESHOT | IRQF_TRIGGER_HIGH)
 
 #define CHATTER_CNT_START		1
 #define DEFAULT_TARGET_CHATTER_CNT	3
 #define DEFAULT_TARGET_CHATTER_INTERVAL	500
-#define DVDD_SHUTDOWN_RETRY_INTERVAL	500
+#define POWER_OFF_RETRY_INTERVAL	500
 
 #define VREG_WORKER_ACTIVE		true
 #define VREG_WORKER_PASSIVE		false
-
-static irqreturn_t ibb_vreg_handler(int irq, void *_chip);
-static irqreturn_t lab_vreg_handler(int irq, void *_chip);
 
 static struct labibb_vreg_status_ctrl {
 	struct delayed_work vreg_check_work;
@@ -451,7 +426,12 @@ static struct labibb_vreg_status_ctrl {
 	int target_chatter_cnt;
 	int target_chatter_check_interval;
 	bool vreg_check_working;
+	bool ocp_lab_detected;
+	bool ocp_ibb_detected;
 } labibb_vreg_check;
+
+static int qpnp_ibb_register_irq(struct device_node *child,
+				struct qpnp_labibb *labibb);
 
 #endif /* CONFIG_SOMC_LCD_OCP_ENABLED */
 
@@ -736,13 +716,13 @@ struct ibb_regulator {
 struct qpnp_labibb {
 	struct device			*dev;
 	struct platform_device		*pdev;
-#ifdef CONFIG_SOMC_LCD_OCP_ENABLED
-	struct device_node		*node_lab;
-	struct device_node		*node_ibb;
-#endif
 	struct regmap			*regmap;
 	struct class			labibb_class;
 	struct pmic_revid_data		*pmic_rev_id;
+#ifdef CONFIG_SOMC_LCD_OCP_ENABLED
+	struct spmi_resource		*lab_spmi_res;
+	struct spmi_resource		*ibb_spmi_res;
+#endif /* CONFIG_SOMC_LCD_OCP_ENABLED */
 	u16				lab_base;
 	u16				ibb_base;
 	u8				lab_dig_major;
@@ -756,12 +736,12 @@ struct qpnp_labibb {
 	struct work_struct		lab_vreg_ok_work;
 	struct delayed_work		sc_err_recovery_work;
 	struct hrtimer			sc_err_check_timer;
+	int				sc_err_count;
+	bool				standalone;
 #ifdef CONFIG_SOMC_LCD_OCP_ENABLED
 	int				lab_vreg_irq;
 	int				ibb_vreg_irq;
-#endif
-	int				sc_err_count;
-	bool				standalone;
+#endif /* CONFIG_SOMC_LCD_OCP_ENABLED */
 	bool				ttw_en;
 	bool				in_ttw_mode;
 	bool				ibb_settings_saved;
@@ -1742,7 +1722,7 @@ static int qpnp_lab_request_interrupt(struct qpnp_labibb *labibb)
 {
 	int rc = 0;
 
-	if (!labibb->node_lab) {
+	if (!labibb->lab_spmi_res) {
 		pr_err("%s: lab spmi_resource is NULL\n", __func__);
 		goto exit;
 	}
@@ -1802,14 +1782,6 @@ static int qpnp_lab_request_interrupt(struct qpnp_labibb *labibb)
 		goto exit;
 	}
 
-	/* request irq */
-	REQUEST_IRQ(labibb, labibb->node_lab,
-		labibb->lab_vreg_irq, "lab_vreg_not_ok_interrupt",
-		lab_vreg_handler, IRQF_LAB_FLAGS, rc);
-	if (rc) {
-		pr_err("lab request irq failed rc=%d\n", rc);
-		goto exit;
-	}
 exit:
 	return rc;
 }
@@ -1818,7 +1790,7 @@ static int qpnp_ibb_request_interrupt(struct qpnp_labibb *labibb)
 {
 	int rc = 0;
 
-	if (!labibb->node_ibb) {
+	if (!labibb->ibb_spmi_res) {
 		pr_err("%s: ibb spmi_resource is NULL\n", __func__);
 		goto exit;
 	}
@@ -1878,10 +1850,6 @@ static int qpnp_ibb_request_interrupt(struct qpnp_labibb *labibb)
 		goto exit;
 	}
 
-	/* request irq */
-	REQUEST_IRQ(labibb, labibb->node_ibb,
-		labibb->ibb_vreg_irq, "ibb_vreg_not_ok_interrupt",
-		ibb_vreg_handler, IRQF_IBB_FLAGS, rc);
 	if (rc) {
 		pr_err("ibb request irq failed rc=%d\n", rc);
 		goto exit;
@@ -1997,6 +1965,9 @@ static int qpnp_lab_dt_init(struct qpnp_labibb *labibb,
 	if (of_property_read_bool(of_node,
 		"qcom,qpnp-lab-limit-max-current-enable")) {
 		val = LAB_CURRENT_LIMIT_EN_BIT;
+#ifdef SOMC_LABIBB_REGULATOR_ORG_IMPL
+		val |= LAB_CURRENT_LIMIT_OVERRIDE;
+#endif /* SOMC_LABIBB_REGULATOR_ORG_IMPL */
 
 		rc = of_property_read_u32(of_node,
 			"qcom,qpnp-lab-limit-maximum-current", &tmp);
@@ -2992,6 +2963,9 @@ static int qpnp_lab_regulator_disable(struct regulator_dev *rdev)
 
 		if (!labibb->standalone)
 			return qpnp_labibb_regulator_disable(labibb);
+#ifdef CONFIG_SOMC_LCD_OCP_ENABLED
+		qpnp_lab_interrupt_disable_ctl(labibb);
+#endif /* CONFIG_SOMC_LCD_OCP_ENABLED */
 
 		val = 0;
 		rc = qpnp_labibb_write(labibb,
@@ -3846,27 +3820,31 @@ static void vreg_check_worker(struct work_struct *work)
 	}
 
 	/* lab vreg status check */
-	rc = qpnp_labibb_read(labibb, labibb->lab_base + REG_LAB_STATUS1,
-				&val, 1);
+	rc = qpnp_labibb_read(labibb,
+			labibb->lab_base + REG_LAB_STATUS1,
+			&val,
+			1);
 	if (rc) {
 		pr_err("%s: read register %x failed rc = %d\n",
 				__func__, REG_LAB_STATUS1, rc);
 		goto read_error;
 	}
 
-	if (!(val & LAB_STATUS1_VREG_OK))
+	if (!(val & LAB_STATUS1_VREG_OK_BIT))
 		goto status_error;
 
 	/* ibb vreg status check */
-	rc = qpnp_labibb_read(labibb, labibb->ibb_base + REG_IBB_STATUS1,
-				&val, 1);
+	rc = qpnp_labibb_read(labibb,
+			labibb->ibb_base + REG_IBB_STATUS1,
+			&val,
+			1);
 	if (rc) {
 		pr_err("%s: read register %x failed rc = %d\n",
 				__func__, REG_IBB_STATUS1, rc);
 		goto read_error;
 	}
 
-	if (!(val & IBB_STATUS1_VREG_OK))
+	if (!(val & IBB_STATUS1_VREG_OK_BIT))
 		goto status_error;
 
 	rc = qpnp_labibb_interrupt_enable_ctl(labibb, VREG_WORKER_ACTIVE);
@@ -3891,13 +3869,9 @@ status_error:
 		force_labibb_regulator_disable(labibb);
 		/* shutdown */
 		do {
-			rc = qpnp_pon_dvdd_shutdown();
-			if (rc) {
-				pr_debug("%s: qpnp_pon_dvdd_shutdown failed rc=%d\n",
-						__func__, rc);
-				msleep(DVDD_SHUTDOWN_RETRY_INTERVAL);
-			}
-		} while (rc);
+			pm_power_off();
+			msleep(POWER_OFF_RETRY_INTERVAL);
+		} while (1);
 		goto exit;
 	}
 
@@ -3916,7 +3890,7 @@ exit:
 }
 #endif /* CONFIG_SOMC_LCD_OCP_ENABLED */
 
-#ifdef CONFIG_REGULATOR_QPNP_LABIBB_SOMC
+#ifdef SOMC_LABIBB_REGULATOR_ORG_IMPL
 /** This API is used to set precharge of LAB regulator
  * regulator: the reglator device
  * time: precharge time
@@ -4158,7 +4132,7 @@ int qpnp_ibb_set_current_max(struct regulator *regulator, u32 limit)
 	return rc;
 }
 EXPORT_SYMBOL(qpnp_ibb_set_current_max);
-#endif /* CONFIG_REGULATOR_QPNP_LABIBB_SOMC */
+#endif /* SOMC_LABIBB_REGULATOR_ORG_IMPL */
 
 static int qpnp_ibb_dt_init(struct qpnp_labibb *labibb,
 				struct device_node *of_node)
@@ -4457,11 +4431,12 @@ static int qpnp_ibb_regulator_disable(struct regulator_dev *rdev)
 	int rc;
 	struct qpnp_labibb *labibb  = rdev_get_drvdata(rdev);
 
+#ifdef CONFIG_SOMC_LCD_OCP_ENABLED
+		qpnp_ibb_interrupt_disable_ctl(labibb);
+#endif /* CONFIG_SOMC_LCD_OCP_ENABLED */
+
 	if (labibb->secure_mode)
 		return 0;
-#ifdef CONFIG_SOMC_LCD_OCP_ENABLED
-		qpnp_lab_interrupt_disable_ctl(labibb);
-#endif /* CONFIG_SOMC_LCD_OCP_ENABLED */
 
 	if (labibb->ibb_vreg.vreg_enabled && !labibb->swire_control) {
 
@@ -4940,105 +4915,6 @@ static struct class_attribute labibb_attributes[] = {
 	 __ATTR_NULL,
 };
 
-#ifdef CONFIG_SOMC_LCD_OCP_ENABLED
-static irqreturn_t lab_vreg_handler(int irq, void *_chip)
-{
-	u8 val;
-	int rc;
-	struct qpnp_labibb *labibb = _chip;
-
-	pr_err("%s: LAB VREG_NG interrupt!\n", __func__);
-	qpnp_labibb_interrupt_disable_ctl(labibb);
-
-	if (!labibb->lab_vreg.vreg_enabled) {
-		pr_err("%s: false detection display is off\n", __func__);
-		goto exit;
-	}
-
-	/* lab status1 */
-	rc = qpnp_labibb_read(labibb, labibb->lab_base + REG_LAB_STATUS1, 
-				&val, 1);
-	if (rc) {
-		pr_err("%s: read register %x failed rc = %d\n",
-				__func__, REG_LAB_STATUS1, rc);
-		goto exit;
-	}
-
-	if (!(val & LAB_STATUS1_VREG_OK))
-		pr_err("%s: LAB VREG NG!!!\n", __func__);
-	else
-		goto false_detection;
-
-	/* start vreg check */
-	if (labibb_vreg_check.vreg_check_working)
-		goto exit;
-
-	labibb_vreg_check.vreg_check_working = true;
-	labibb_vreg_check.current_chatter_cnt = CHATTER_CNT_START;
-	schedule_delayed_work(&labibb_vreg_check.vreg_check_work,
-		msecs_to_jiffies(
-			labibb_vreg_check.target_chatter_check_interval));
-	goto exit;
-
-false_detection:
-	rc = qpnp_labibb_interrupt_enable_ctl(labibb, VREG_WORKER_PASSIVE);
-	if (rc)
-		pr_err("%s: qpnp_labibb_interrupt_enable_ctl error\n",
-							__func__);
-exit:
-	return IRQ_HANDLED;
-}
-
-static irqreturn_t ibb_vreg_handler(int irq, void *_chip)
-{
-	u8 val;
-	int rc;
-	struct qpnp_labibb *labibb = _chip;
-
-	pr_err("%s: IBB VREG_NG interrupt!\n", __func__);
-	qpnp_labibb_interrupt_disable_ctl(labibb);
-
-	if (!labibb->ibb_vreg.vreg_enabled) {
-		pr_err("%s: false detection display is off\n", __func__);
-		goto exit;
-	}
-
-	/* ibb status1 */
-	rc = qpnp_labibb_read(labibb, labibb->ibb_base + REG_IBB_STATUS1,
-				&val, 1);
-	if (rc) {
-		pr_err("%s: read register %x failed rc = %d\n",
-				__func__, REG_IBB_STATUS1, rc);
-		goto exit;
-	}
-
-	if (!(val & IBB_STATUS1_VREG_OK))
-		pr_err("%s: IBB VREG NG!!!\n", __func__);
-	else
-		goto false_detection;
-
-	/* start vreg check */
-	if (labibb_vreg_check.vreg_check_working)
-		goto exit;
-
-	labibb_vreg_check.vreg_check_working = true;
-	labibb_vreg_check.current_chatter_cnt = CHATTER_CNT_START;
-	schedule_delayed_work(&labibb_vreg_check.vreg_check_work,
-		msecs_to_jiffies(
-			labibb_vreg_check.target_chatter_check_interval));
-	goto exit;
-
-false_detection:
-	rc = qpnp_labibb_interrupt_enable_ctl(labibb, VREG_WORKER_PASSIVE);
-	if (rc)
-		pr_err("%s: qpnp_labibb_interrupt_enable_ctl error\n",
-							__func__);
-
-exit:
-	return IRQ_HANDLED;
-}
-#endif /* CONFIG_SOMC_LCD_OCP_ENABLED */
-
 static int qpnp_labibb_regulator_probe(struct platform_device *pdev)
 {
 	struct qpnp_labibb *labibb;
@@ -5210,9 +5086,6 @@ static int qpnp_labibb_regulator_probe(struct platform_device *pdev)
 
 		switch (type) {
 		case QPNP_LAB_TYPE:
-#ifdef CONFIG_SOMC_LCD_OCP_ENABLED
-			labibb->node_lab = child;
-#endif
 			labibb->lab_base = base;
 			labibb->lab_dig_major = revision;
 			rc = qpnp_lab_register_irq(child, labibb);
@@ -5227,11 +5100,16 @@ static int qpnp_labibb_regulator_probe(struct platform_device *pdev)
 		break;
 
 		case QPNP_IBB_TYPE:
-#ifdef CONFIG_SOMC_LCD_OCP_ENABLED
-			labibb->node_ibb = child;
-#endif
 			labibb->ibb_base = base;
 			labibb->ibb_dig_major = revision;
+#ifdef CONFIG_SOMC_LCD_OCP_ENABLED
+			rc = qpnp_ibb_register_irq(child, labibb);
+			if (rc) {
+				pr_err("Failed to register IBB IRQ rc=%d\n",
+							rc);
+				goto fail_registration;
+			}
+#endif /* CONFIG_SOMC_LCD_OCP_ENABLED */
 			qpnp_ibb_register_irq(child, labibb);
 			rc = register_qpnp_ibb_regulator(labibb, child);
 			if (rc < 0)
@@ -5291,6 +5169,7 @@ fail_registration:
 	if (labibb->ibb_vreg_irq)
 		free_irq(labibb->ibb_vreg_irq, labibb);
 #endif /* CONFIG_SOMC_LCD_OCP_ENABLED */
+
 	return rc;
 }
 
@@ -5317,7 +5196,6 @@ static int qpnp_labibb_regulator_remove(struct platform_device *pdev)
 			regulator_unregister(labibb->ibb_vreg.rdev);
 
 		cancel_work_sync(&labibb->lab_vreg_ok_work);
-
 #ifdef CONFIG_SOMC_LCD_OCP_ENABLED
 		if (labibb->lab_vreg_irq)
 			free_irq(labibb->lab_vreg_irq, labibb);

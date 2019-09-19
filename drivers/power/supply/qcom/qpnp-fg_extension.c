@@ -669,15 +669,11 @@ static void somc_fg_remove_sysfs_entries(struct device *dev)
 
 static int somc_fg_register(struct fg_chip *chip)
 {
-	struct fg_somc_params *params = &chip->somc_params;
 	int rc;
 
 	rc = somc_fg_create_sysfs_entries(chip->dev);
 	if (rc < 0)
 		goto exit;
-
-	params->learning_data.last_battery_soc =
-				chip->learning_data.max_start_soc;
 
 	pr_fg_ext(PR_INFO, "somc fg register success\n");
 	return 0;

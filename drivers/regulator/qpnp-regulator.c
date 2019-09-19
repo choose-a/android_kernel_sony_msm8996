@@ -10,6 +10,11 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
+/*
+ * NOTE: This file has been modified by Sony Mobile Communications Inc.
+ * Modifications are Copyright (c) 2013 Sony Mobile Communications Inc,
+ * and licensed under the license of the file.
+ */
 
 #define pr_fmt(fmt) "%s: " fmt, __func__
 
@@ -1589,8 +1594,6 @@ static struct regulator_ops qpnp_ln_ldo_ops = {
 	.get_voltage		= qpnp_regulator_common_get_voltage,
 	.list_voltage		= qpnp_regulator_common_list_voltage,
 	.enable_time		= qpnp_regulator_common_enable_time,
-	.register_ocp_notification
-		= qpnp_regulator_vs_register_ocp_notification,
 };
 
 static struct regulator_ops qpnp_vs_ops = {

@@ -11,6 +11,9 @@
  */
 /*
  * Qualcomm Technologies, Inc. QPNP Pulse Width Modulation (PWM) driver
+ * NOTE: This file has been modified by Sony Mobile Communications Inc.
+ * Modifications are Copyright (c) 2015 Sony Mobile Communications Inc,
+ * and licensed under the license of the file.
  *
  * The HW module is also called LPG (Light Pattern Generator).
  */
@@ -36,6 +39,9 @@
 #define QPNP_PWM_MODE_ONLY_SUB_TYPE	0x0B
 #define QPNP_LPG_CHAN_SUB_TYPE		0x2
 #define QPNP_LPG_S_CHAN_SUB_TYPE	0x11
+
+/* LPG Control for LUT_RAMP_CONTROL */
+#define QPNP_LUT_RAMP_CONTROL_MASK	0xFF
 
 /* LPG Control for LPG_PATTERN_CONFIG */
 #define QPNP_RAMP_DIRECTION_SHIFT	4
@@ -312,6 +318,7 @@ struct qpnp_lpg_config {
 
 struct _qpnp_pwm_config {
 	int				pwm_value;
+	int				pwm_max_value;
 	int				pwm_period;	/* in microseconds */
 	int				pwm_duty;	/* in microseconds */
 	struct pwm_period_config	period;
@@ -586,6 +593,7 @@ static int qpnp_lpg_change_table(struct qpnp_pwm_chip *chip,
 {
 	unsigned int		pwm_value, max_pwm_value;
 	struct qpnp_lut_config	*lut = &chip->lpg_config.lut_config;
+	struct _qpnp_pwm_config	*pwm_config = &chip->pwm_config;
 	int			i, pwm_size, rc = 0;
 	int			burst_size = SPMI_MAX_BUF_LEN;
 	int			list_len = lut->list_len << 1;
@@ -596,6 +604,9 @@ static int qpnp_lpg_change_table(struct qpnp_pwm_chip *chip,
 				QPNP_MIN_PWM_BIT_SIZE;
 
 	max_pwm_value = (1 << pwm_size) - 1;
+	if (pwm_config->pwm_max_value
+		&& (max_pwm_value > pwm_config->pwm_max_value))
+		max_pwm_value = pwm_config->pwm_max_value;
 
 	if (unlikely(lut->list_len != (lut->hi_index - lut->lo_index + 1))) {
 		pr_err("LUT internal Data structure corruption detected\n");
@@ -693,6 +704,9 @@ static int qpnp_lpg_save_pwm_value(struct qpnp_pwm_chip *chip)
 
 	if (pwm_config->pwm_value > max_pwm_value)
 		pwm_config->pwm_value = max_pwm_value;
+	if (pwm_config->pwm_max_value
+		&& (pwm_config->pwm_value > pwm_config->pwm_max_value))
+		pwm_config->pwm_value = pwm_config->pwm_max_value;
 
 	value = (pwm_config->pwm_value >> QPNP_PWM_VALUE_MSB_SHIFT) &
 					QPNP_PWM_VALUE_MSB_MASK;
@@ -846,7 +860,7 @@ static int qpnp_lpg_configure_ramp_step_duration(struct qpnp_pwm_chip *chip)
 	int			rc, value;
 	u8			val, mask;
 
-	value = QPNP_GET_RAMP_STEP_DURATION(lut_config.ramp_step_ms);
+	value = lut_config.ramp_step_ms;
 	val = value & QPNP_RAMP_STEP_DURATION_LSB_MASK;
 	mask = QPNP_RAMP_STEP_DURATION_LSB_MASK;
 
@@ -1316,6 +1330,7 @@ after_table_write:
 }
 
 /* lpg_lock should be held while calling _pwm_enable() */
+
 static int _pwm_enable(struct qpnp_pwm_chip *chip)
 {
 	int rc = 0;
@@ -1741,6 +1756,91 @@ int pwm_lut_config(struct pwm_device *pwm, int period_us,
 }
 EXPORT_SYMBOL(pwm_lut_config);
 
+/**
+ * pwm_start_lut_ramp - start LUT ramp to sync
+ *
+ * @pwm: the PWM device
+ * @ramp_control: set bit corresponding to LPG channel.
+ */
+int pwm_start_lut_ramp(struct pwm_device *pwm,  int ramp_control)
+{
+	struct qpnp_lpg_config *lpg_config;
+	struct qpnp_pwm_chip *chip;
+	u8 value1, mask1;
+	u8 *reg1;
+	u16 addr;
+
+	chip = qpnp_pwm_from_pwm_dev(pwm);
+	lpg_config = &chip->lpg_config;
+
+	value1 = chip->qpnp_lpg_registers[QPNP_RAMP_CONTROL];
+	reg1 = &chip->qpnp_lpg_registers[QPNP_RAMP_CONTROL];
+
+	mask1 = QPNP_LUT_RAMP_CONTROL_MASK;
+	value1 = mask1 & ramp_control;
+
+	addr = lpg_config->lut_base_addr +
+		SPMI_LPG_REV1_RAMP_CONTROL_OFFSET;
+
+	return qpnp_lpg_save_and_write(value1, mask1, reg1,
+					addr, 1, chip);
+}
+EXPORT_SYMBOL_GPL(pwm_start_lut_ramp);
+
+/**
+ * pwm_config_period_value - change PWM period and pwm value
+ *
+ * @pwm: the PWM device
+ * @pwm_p: period in struct qpnp_lpg_period
+ * @pwm_value: PWM value
+ */
+int pwm_config_period_value(struct pwm_device *pwm,
+			     struct pwm_period_config *pwm_p, int pwm_value)
+{
+	unsigned long flags;
+	struct qpnp_pwm_chip *chip;
+	int rc = pwm_config_period(pwm, pwm_p);
+	if (rc)
+		return rc;
+	chip = qpnp_pwm_from_pwm_dev(pwm);
+
+	spin_lock_irqsave(&chip->lpg_lock, flags);
+	/* need check argment */
+	chip->pwm_config.pwm_value = pwm_value;
+	rc = qpnp_lpg_save_pwm_value(chip);
+	spin_unlock_irqrestore(&chip->lpg_lock, flags);
+	return rc;
+}
+EXPORT_SYMBOL_GPL(pwm_config_period_value);
+
+int pwm_get_max_pwm_value(struct pwm_device *pwm)
+{
+	unsigned long flags;
+	struct qpnp_pwm_chip *chip;
+	int max;
+
+	chip = qpnp_pwm_from_pwm_dev(pwm);
+
+	spin_lock_irqsave(&chip->lpg_lock, flags);
+	max = chip->pwm_config.pwm_max_value;
+	spin_unlock_irqrestore(&chip->lpg_lock, flags);
+	return max;
+}
+EXPORT_SYMBOL_GPL(pwm_get_max_pwm_value);
+
+void pwm_set_max_pwm_value(struct pwm_device *pwm, int max)
+{
+	unsigned long flags;
+	struct qpnp_pwm_chip *chip;
+
+	chip = qpnp_pwm_from_pwm_dev(pwm);
+
+	spin_lock_irqsave(&chip->lpg_lock, flags);
+	chip->pwm_config.pwm_max_value = max;
+	spin_unlock_irqrestore(&chip->lpg_lock, flags);
+}
+EXPORT_SYMBOL_GPL(pwm_set_max_pwm_value);
+
 static int qpnp_parse_pwm_dt_config(struct device_node *of_pwm_node,
 		struct device_node *of_parent, struct qpnp_pwm_chip *chip)
 {
@@ -2048,6 +2148,10 @@ static int qpnp_parse_dt_config(struct platform_device *pdev,
 			kfree(lut_config->duty_pct_list);
 			return rc;
 		}
+		rc = of_property_read_u32(of_node, "qcom,pwm-max-value",
+				&chip->pwm_config.pwm_max_value);
+		if (rc)
+			chip->pwm_config.pwm_max_value = 0;
 	}
 
 	rc = of_property_read_u32(of_node, "qcom,dtest-line",
