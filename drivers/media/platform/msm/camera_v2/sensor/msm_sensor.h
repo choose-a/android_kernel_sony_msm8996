@@ -94,7 +94,9 @@ struct msm_sensor_ctrl_t {
 	uint32_t set_mclk_23880000;
 	uint8_t is_csid_tg_mode;
 	uint32_t is_secure;
+#ifndef CONFIG_ARCH_SONY_TONE
 	uint8_t bypass_video_node_creation;
+#endif
 #if defined(CONFIG_SONY_CAM_V4L2)
 	uint32_t sof_count;
 #endif
