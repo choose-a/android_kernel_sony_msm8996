@@ -23,8 +23,7 @@ static inline void *rhashtable_lookup_get_insert_fast(
 
 	BUG_ON(ht->p.obj_hashfn);
 
-	return __rhashtable_insert_fast(ht, key + ht->p.key_offset, obj, params,
-					false);
+	return __rhashtable_insert_fast(ht, key + ht->p.key_offset, obj, params);
 }
 #endif
 
