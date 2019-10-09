@@ -16,8 +16,8 @@
 # CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ccflags-y += \
-	-I$(backport_srctree)/drivers/net/wireless/broadcom/brcm80211/brcmfmac	\
-	-I$(backport_srctree)/drivers/net/wireless/broadcom/brcm80211/include
+	-I $(src) \
+	-I $(src)/../include
 
 obj-$(CONFIG_BACKPORT_BRCMFMAC) += brcmfmac.o
 brcmfmac-objs += \
@@ -54,3 +54,5 @@ brcmfmac-$(CONFIG_BACKPORT_BRCM_TRACING) += \
 		tracepoint.o
 brcmfmac-$(CONFIG_OF) += \
 		of.o
+brcmfmac-$(CONFIG_DMI) += \
+		dmi.o

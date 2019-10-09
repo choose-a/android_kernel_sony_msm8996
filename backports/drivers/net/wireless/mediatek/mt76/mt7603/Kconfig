@@ -1,0 +1,10 @@
+config BACKPORT_MT7603E
+	tristate "MediaTek MT7603E (PCIe) and MT76x8 WLAN support"
+	depends on !MT7603E
+	select BACKPORT_MT76_CORE
+	depends on BACKPORT_MAC80211
+	depends on PCI
+	help
+	  This adds support for MT7603E wireless PCIe devices and the BACKPORT_WLAN core on
+	  MT7628/MT7688 SoC devices
+

@@ -17,6 +17,7 @@
 #ifndef BRCMFMAC_BUS_H
 #define BRCMFMAC_BUS_H
 
+#include <linux/skbuff.h>
 #include "debug.h"
 
 /* IDs of the 6 default common rings of msgbuf protocol */
@@ -90,6 +91,7 @@ struct brcmf_bus_ops {
 	int (*get_memdump)(struct device *dev, void *data, size_t len);
 	int (*get_fwname)(struct device *dev, const char *ext,
 			  unsigned char *fw_name);
+	void (*debugfs_create)(struct device *dev);
 };
 
 
@@ -233,6 +235,15 @@ int brcmf_bus_get_fwname(struct brcmf_bus *bus, const char *ext,
 			 unsigned char *fw_name)
 {
 	return bus->ops->get_fwname(bus->dev, ext, fw_name);
+}
+
+static inline
+void brcmf_bus_debugfs_create(struct brcmf_bus *bus)
+{
+	if (!bus->ops->debugfs_create)
+		return;
+
+	return bus->ops->debugfs_create(bus->dev);
 }
 
 /*

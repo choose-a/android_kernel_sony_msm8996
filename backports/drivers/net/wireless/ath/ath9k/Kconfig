@@ -128,7 +128,7 @@ config BACKPORT_ATH9K_DFS_CERTIFIED
 	  except increase code size.
 
 config BACKPORT_ATH9K_DYNACK
-	bool "Atheros ath9k ACK timeout estimation algorithm (EXPERIMENTAL)"
+	bool "Atheros ath9k ACK timeout estimation algorithm"
 	depends on !ATH9K_DYNACK
 	depends on BACKPORT_ATH9K
 	default n
