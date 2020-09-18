@@ -9,6 +9,11 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
+/*
+ * NOTE: This file has been modified by Sony Mobile Communications Inc.
+ * Modifications are Copyright (c) 2016 Sony Mobile Communications Inc,
+ * and licensed under the license of the file.
+ */
 #include <linux/slab.h>
 #include <linux/debugfs.h>
 #include <linux/kernel.h>
@@ -115,6 +120,7 @@ struct afe_ctl {
 	struct afe_sp_ex_vi_get_param_resp	ex_vi_resp;
 	int vi_tx_port;
 	int vi_rx_port;
+	bool fbsp_mono_right;
 	uint32_t afe_sample_rates[AFE_MAX_PORTS];
 	struct aanc_data aanc_info;
 	struct mutex afe_cmd_lock;
@@ -259,15 +265,6 @@ static int32_t sp_make_afe_callback(uint32_t *payload, uint32_t payload_size)
 	return 0;
 }
 
-static bool afe_token_is_valid(uint32_t token)
-{
-	if (token >= AFE_MAX_PORTS) {
-		pr_err("%s: token %d is invalid.\n", __func__, token);
-		return false;
-	}
-	return true;
-}
-
 static int32_t afe_callback(struct apr_client_data *data, void *priv)
 {
 	if (!data) {
@@ -334,10 +331,7 @@ static int32_t afe_callback(struct apr_client_data *data, void *priv)
 		if (sp_make_afe_callback(data->payload, data->payload_size))
 			return -EINVAL;
 
-		if (afe_token_is_valid(data->token))
-			wake_up(&this_afe.wait[data->token]);
-		else
-			return -EINVAL;
+		wake_up(&this_afe.wait[data->token]);
 	} else if (data->payload_size) {
 		uint32_t *payload;
 		uint16_t port_id = 0;
@@ -372,10 +366,7 @@ static int32_t afe_callback(struct apr_client_data *data, void *priv)
 			case AFE_PORTS_CMD_DTMF_CTL:
 			case AFE_SVC_CMD_SET_PARAM:
 				atomic_set(&this_afe.state, 0);
-				if (afe_token_is_valid(data->token))
-					wake_up(&this_afe.wait[data->token]);
-				else
-					return -EINVAL;
+				wake_up(&this_afe.wait[data->token]);
 				break;
 			case AFE_SERVICE_CMD_REGISTER_RT_PORT_DRIVER:
 				break;
@@ -387,10 +378,7 @@ static int32_t afe_callback(struct apr_client_data *data, void *priv)
 				break;
 			case AFE_CMD_ADD_TOPOLOGIES:
 				atomic_set(&this_afe.state, 0);
-				if (afe_token_is_valid(data->token))
-					wake_up(&this_afe.wait[data->token]);
-				else
-					return -EINVAL;
+				wake_up(&this_afe.wait[data->token]);
 				pr_debug("%s: AFE_CMD_ADD_TOPOLOGIES cmd 0x%x\n",
 						__func__, payload[1]);
 				break;
@@ -412,10 +400,7 @@ static int32_t afe_callback(struct apr_client_data *data, void *priv)
 			else
 				this_afe.mmap_handle = payload[0];
 			atomic_set(&this_afe.state, 0);
-			if (afe_token_is_valid(data->token))
-				wake_up(&this_afe.wait[data->token]);
-			else
-				return -EINVAL;
+			wake_up(&this_afe.wait[data->token]);
 		} else if (data->opcode == AFE_EVENT_RT_PROXY_PORT_STATUS) {
 			port_id = (uint16_t)(0x0000FFFF & payload[0]);
 		}
@@ -1048,12 +1033,21 @@ static void afe_send_cal_spkr_prot_tx(int port_id)
 			afe_spk_config.vi_proc_cfg.operation_mode =
 					    Q6AFE_MSM_SPKR_FTM_MODE;
 		afe_spk_config.vi_proc_cfg.minor_version = 1;
-		afe_spk_config.vi_proc_cfg.r0_cali_q24[SP_V2_SPKR_1] =
-			(uint32_t) this_afe.prot_cfg.r0[SP_V2_SPKR_1];
+		if (this_afe.fbsp_mono_right) {
+			pr_info("%s: Right Channel R0T0 used in Mono case\n",
+				 __func__);
+			afe_spk_config.vi_proc_cfg.r0_cali_q24[SP_V2_SPKR_1] =
+				(uint32_t) this_afe.prot_cfg.r0[SP_V2_SPKR_2];
+			afe_spk_config.vi_proc_cfg.t0_cali_q6[SP_V2_SPKR_1] =
+				(uint32_t) this_afe.prot_cfg.t0[SP_V2_SPKR_2];
+		} else {
+			afe_spk_config.vi_proc_cfg.r0_cali_q24[SP_V2_SPKR_1] =
+				(uint32_t) this_afe.prot_cfg.r0[SP_V2_SPKR_1];
+			afe_spk_config.vi_proc_cfg.t0_cali_q6[SP_V2_SPKR_1] =
+				(uint32_t) this_afe.prot_cfg.t0[SP_V2_SPKR_1];
+		}
 		afe_spk_config.vi_proc_cfg.r0_cali_q24[SP_V2_SPKR_2] =
 			(uint32_t) this_afe.prot_cfg.r0[SP_V2_SPKR_2];
-		afe_spk_config.vi_proc_cfg.t0_cali_q6[SP_V2_SPKR_1] =
-			(uint32_t) this_afe.prot_cfg.t0[SP_V2_SPKR_1];
 		afe_spk_config.vi_proc_cfg.t0_cali_q6[SP_V2_SPKR_2] =
 			(uint32_t) this_afe.prot_cfg.t0[SP_V2_SPKR_2];
 		if (this_afe.prot_cfg.mode != MSM_SPKR_PROT_NOT_CALIBRATED) {
@@ -5664,6 +5658,10 @@ int afe_spk_prot_feed_back_cfg(int src_port, int dst_port,
 		prot_config.feedback_path_cfg.chan_info[index++] = 4;
 	}
 	prot_config.feedback_path_cfg.num_channels = index;
+	if (index == 2)
+		this_afe.fbsp_mono_right = true;
+	else
+		this_afe.fbsp_mono_right = false;
 	pr_debug("%s no of channels: %d\n", __func__, index);
 	prot_config.feedback_path_cfg.minor_version = 1;
 	ret = afe_spk_prot_prepare(src_port, dst_port,
